@@ -1,21 +1,16 @@
-from langdetect import detect
-import camelot
 import os
-from utils.upload_file import upload_file
+import camelot
+from langdetect import detect
 
 def ocr_fr_detect_v2(file):
     """ 
     This function takes a pdf file as an input and outputs a txt file with the same name.
     The txt file contains only the french text contained in the pdf document.
     Takes approximatly 20 seconds for 6 pages
-    """
-    # define vowels
+    """ 
     vowels = ['a','e','i','o','u']
-    # initialize text list 
     fr = []
-    # languages that are labelled as duch
     duch = {'da', 'sl', 'de', 'nl', 'et' ,'no', 'af','fi', 'tl', 'sv', 'so'}
-    # languages that are labelled as duch
     french = {'hr', 'ca', 'fr','ro', 'it', 'lv', 'en', 'es', 'cy'}
     # check the file extension
     if file.endswith(".pdf"):
@@ -23,7 +18,6 @@ def ocr_fr_detect_v2(file):
         tables = camelot.read_pdf(file, flavor='stream' , pages= 'all', edge_tol=0)
         # for every detected table (page and text structure)
         for i in range(len(tables)):
-            # create an empty language list
             col_lang = []
             # make a df
             data = tables[i].df
@@ -40,14 +34,14 @@ def ocr_fr_detect_v2(file):
                     # detect language
                     try:
                         language = detect(col_text)
-                        # update languages list
                         col_lang.append(language)
                     except:
                         col_lang.append('Error')
-                        #print("This row throws and error:", i, j, col_text) # debug, prints table, column and text
+                        #print("This row throws and error:", i, j, col_text)
                     
                 else:
                     col_lang.append('None')
+            #print(col_lang)
             for k in range(len(data)):
                 # put all the text of that column in a list # this takes also out empty rows and lone numbers (as pagenumber)
                 #text_list = [x for x in tables[i].df[j].values if x != '' if not x.isdigit()] 
@@ -61,27 +55,22 @@ def ocr_fr_detect_v2(file):
                         #print(language,': ', text)
                         fr.append(text)
                     elif language in duch or language == 'None':
-                        #print(language,': ', text) # debug, print duch text and columns with no vowels
+                        #print(language,': ', text)
                         pass
                     else: 
-                        
-                        if len(text)>1:
-                            #print(i, g, language ,text ) # debug, print unexpected languages or errors 
-                            # add rows that contains unexpected languages or errors, longer than one digit to the french version
-                            fr.append(text)
-                         
+                        pass                            
+        # prepare the text
+        french_text = (' '.join(fr))
+        #reunite halved words
+        french_text = french_text.replace("- ", "")
+        # SEND TO DB
+        object_ID = os.path.basename(os.path.split(file)[0])
         # Outputs the french text in a text file
         text_file = os.path.basename(os.path.splitext(file)[0] + "_fr.txt")
-        # print(os.path.basename(text_file))
         filepath = os.path.join("dags/kpmg-pipeline/text_extractor/fr_text", text_file)
         with open(filepath, "w") as output:
-            for row in fr:
-                output.write(row)
-                # add a space between words
-                output.write(' ')
+            output.write(french_text)
             # little feedback
-            upload_file(filepath, text_file)
-            print(f'french extracted into: {filepath}')
+            print(f'french extracted into: {file}')
     else:
         print('not a pdf')
-        pass
