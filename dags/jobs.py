@@ -5,6 +5,7 @@ import os
 from airflow.operators.bash_operator import BashOperator
 from airflow.operators.docker_operator import DockerOperator
 from airflow.operators.dummy_operator import DummyOperator
+# from airflow.operators.python import ShortCircuitOperator
 
 default_args = {
 'owner'                 : 'airflow',
@@ -28,7 +29,7 @@ with DAG('kpmg_use_case', default_args=default_args, catchup=False) as dag:
         task_id='end_dag'
         )        
 
-    t1 = DockerOperator(
+    scrape = DockerOperator(
         task_id='scrape_for_pdf',
         image='scraper:latest',
         container_name='scraper_task',
@@ -39,11 +40,18 @@ with DAG('kpmg_use_case', default_args=default_args, catchup=False) as dag:
         environment={
             "AZURE_CONNECTION_STRING": os.getenv("AZURE_CONNECTION_STRING"),
             "STORAGE_CONTAINER": os.getenv("STORAGE_CONTAINER"),
+            "APP_ID": os.getenv("APP_ID"),
+            "API_ADMIN_KEY": os.getenv("API_ADMIN_KEY"),
+            "DB_NAME": os.getenv("DB_NAME"),
             "PIPELINE_ID": pipeline_id
         }
     )
+
+    # skip_tasks = ShortCircuitOperator(
+    #     task_id="skip_tasks"
+    # )
         
-    t2 = DockerOperator(
+    extract_text = DockerOperator(
         task_id='extract_pdf_text',
         image='text_extractor:latest',
         container_name='text_extractor_task',
@@ -54,19 +62,52 @@ with DAG('kpmg_use_case', default_args=default_args, catchup=False) as dag:
         environment={
             "AZURE_CONNECTION_STRING": os.getenv("AZURE_CONNECTION_STRING"),
             "STORAGE_CONTAINER": os.getenv("STORAGE_CONTAINER"),
+            "APP_ID": os.getenv("APP_ID"),
+            "API_ADMIN_KEY": os.getenv("API_ADMIN_KEY"),
+            "DB_NAME": os.getenv("DB_NAME"),
             "PIPELINE_ID": pipeline_id
         }
     )
 
-    t3 = BashOperator(
-        task_id='process_text_data',
-        bash_command='echo "Get the text from database and process it with a model?"'
-        )
+    classify_data = DockerOperator(
+        task_id='classify_data',
+        image='classification:latest',
+        container_name='classification_task',
+        api_version='auto',
+        auto_remove=True,
+        docker_url="unix://var/run/docker.sock",
+        network_mode="bridge",
+        environment={
+            "APP_ID": os.getenv("APP_ID"),
+            "API_ADMIN_KEY": os.getenv("API_ADMIN_KEY"),
+            "DB_NAME": os.getenv("DB_NAME"),
+            "PIPELINE_ID": pipeline_id
+        }
+    )
 
-    start_dag >> t1 
+    summarize_text = DockerOperator(
+        task_id='summarize_text',
+        image='summary:latest',
+        container_name='summarize_text_task',
+        api_version='auto',
+        auto_remove=True,
+        docker_url="unix://var/run/docker.sock",
+        network_mode="bridge",
+        environment={
+            "APP_ID": os.getenv("APP_ID"),
+            "API_ADMIN_KEY": os.getenv("API_ADMIN_KEY"),
+            "DB_NAME": os.getenv("DB_NAME"),
+            "API_KEY_OPENAI": os.getenv("API_KEY_OPENAI"),
+            "PIPELINE_ID": pipeline_id
+        }
+    )
+
+    start_dag >> scrape 
     
-    t1 >> t2
+    scrape >> extract_text
 
-    t2 >> t3
+    extract_text >> classify_data
 
-    t3 >> end_dag
+    classify_data >> summarize_text
+
+    summarize_text >> end_dag

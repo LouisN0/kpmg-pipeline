@@ -3,8 +3,7 @@ FROM python:3.10
 RUN mkdir /app
 WORKDIR /app
 
-COPY text_extractor /app
-COPY utils/download_file.py /app/utils/download_file.py
+COPY classification /app
 
 RUN pip3 install -r requirements.txt
 
