@@ -1,13 +1,10 @@
 from azure.storage.blob import BlobServiceClient
 import os
-from dotenv import load_dotenv
-# Load environment variables from the .env file
-load_dotenv(".env")
+import json
 
 def upload_file(local_file_path: str, blob_name: str) -> None:
     """
     Upload a blob (file) to an Azure Storage container.
-
     :param local_file_path: The path to the local file to upload.
     :param blob_name: The name to give the blob (file) in the container.
     """

@@ -1,89 +1,101 @@
-import requests
-import json
-from datetime import datetime, timedelta
 import os
+import time
+import requests
+from datetime import datetime, timedelta
+from algoliasearch.search_client import SearchClient
+from utils.upload_file import upload_file
 
-now = datetime.now() 
+now = datetime.now()
 today = now.strftime("%Y-%m-%d")
-yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d") #new files not added often so increase the days number in timedelta to avoid empty string
+yesterday = (now - timedelta(days=1)).strftime(
+    "%Y-%m-%d"
+)  # new files not added often so increase the days number in timedelta to avoid empty string
 
-#search page url:
+# search page url:
 url = "https://public-search.emploi.belgique.be/website-service/joint-work-convention/search"
 
-#download page that will be added to each document name to have a full downloadable link
+# download page that will be added to each document name to have a full downloadable link
 dl_url = "https://public-search.emploi.belgique.be/website-download-service/joint-work-convention/"
 
-#request
-r = requests.post(url,json={"signatureDate": {'start': yesterday+"T00:00:00.000Z", 'end': today+"T00:00:00.000Z"}})
+# request
+# req = requests.post(url,json={"signatureDate": {'start': yesterday+"T00:00:00.000Z", 'end': today+"T00:00:00.000Z"}})
 
+#200-2021-013463
 # If you want to filter on a specific CP (here 200), instead of dates. Both dates and CP filters can also be combined in the 'json' dict parameter
-#r = requests.post(url,json={"jc":"2000000"})
+# req = requests.post(url,json={"lang":"fr","jc":"2000000","title":"","superTheme":"","theme":"","textSearchTerms":"","depositNumber":{"start":"174187","end":"174187"}})
+req = requests.post(url, json={"lang":"fr","jc":"2000000","title":"Frais de transports","superTheme":"","theme":"","textSearchTerms":"","depositNumber":{"start":"168824","end":"168824"}})
+list_data = req.json()
 
-data = r.json()
+def scrape(dl_url, list_data):
+    if bool(list_data) == True:
+        data = list_data[0]
+        app_id = os.getenv("APP_ID")
+        api_key = os.getenv("API_ADMIN_KEY")
+        db_name = os.getenv("DB_NAME")
 
-#function that checks if json file already exists
-def where_json(file_name):
-    return os.path.exists(file_name)
-
-#checking json file and opening it if it exists
-if where_json("data.json"):
-    with open("data.json","r") as file:
-        existing_data = json.loads(file.read())
-else: #creating an empty list
-    existing_data = []
-
-new_data = []
-for item in data:
-
-
-    #checks if entry already existing in database
-    if not any(d['depositNumber'] == item['depositNumber'] for d in existing_data):
-        split = item['documentLink'].split('/')
-
-        #gets the Commission Paritaire number
-        item['CPnumber'] = split[0]
-
-        #gets the file number
-        item['DocNumber'] = split[1][:-4]
-
-        #replaces name of the file with complete downloadable link
-        item['documentLink'] = dl_url + item['documentLink']
-
-        #downloads the pdf from link
-        response = requests.get(item['documentLink'])
-        if response.status_code == 200:
-
-            #saves the pdf in directory depending on CP number
-            if not os.path.exists(f"{item['CPnumber']}"):      
-                os.makedirs(f"{item['CPnumber']}")
-
-            file_path = os.path.join(f"{item['CPnumber']}",os.path.basename(item['documentLink']))
-
-            with open(file_path, 'wb') as f:
-                f.write(response.content)
-
-        #append item data dict to list
-        new_data.append(item)
-
-        #add email alert here??? with download link?
+        client = SearchClient.create(app_id=app_id, api_key=api_key)
+        index = client.init_index(db_name)
     
-    #replaces the previous existing data with new data
-    if new_data: 
-        existing_data = new_data
+        try:
+            object_id = data["documentLink"].split('/')[1][:-4]
+            index.get_object(object_id + "2")
+        except Exception as e:
+            jc_metadata = {
+            # "objectID": data["documentLink"].split('/')[1][:-4],
+            "objectID": object_id + "_test",
+            "jcId": data["jcId"], 
+            "jcName": data["jcFr"], 
+            "cpNumber": data["documentLink"].split('/')[0],
+            "depositNumber": data["depositNumber"], 
+            "title": data["titleFr"], 
+            "themes": data["themesFr"],
+            "referencedDocs": "",
+            "referencedObjects": "",
+            "parent": "",
+            "signatureDate": data["signatureDate"], 
+            "validityDate": data["validityDate"], 
+            "depositDate": data["depositDate"], 
+            "recordDate": data["recordDate"], 
+            "depositRegistrationDate": data["depositRegistrationDate"], 
+            "noticeDepositMbDate": data["noticeDepositMBDate"], 
+            "correctedDate": None, 
+            "enforced": data["enforced"], 
+            "royalDecreeDate": data["royalDecreeDate"], 
+            "publicationRoyalDecreeDate": data["publicationRoyalDecreeDate"],
+            "retrieveDate": int(time.time()),
+            "pdfLink": dl_url + data["documentLink"], 
+            "documentSize": data["documentSize"],
+            "cla_type": "",
+            "cla_status": "",
+            "cla_sector": "",
+            "cla_theme": "", 
+            "scope": data["scopeFr"], 
+            "noScope": data["noScopeFr"],
+            "content": "",
+            "summary": "",
+            "summaryCompareParent": "",
+            "articleSummary": "",
+            "articleNewSummary": "",
+            "articleUpdateComparison": "",
+            "startDate": "",
+            "endDate": "",
+            "exeption": "",
+            "vector": "",
+            "inProgress": True
+            }
+        
+            index.save_object(jc_metadata)
 
-#save list as json file
-json_object = json.dumps(existing_data, indent=4)
+            download_link = dl_url + data["documentLink"]
+            dl_request = requests.get(download_link)
+            pdf_file_name = data["documentLink"].split("/")[1]
+            with open(pdf_file_name, "wb") as pdf_file:
+                pdf_file.write(dl_request.content)
+        
+            upload_file(pdf_file_name, pdf_file_name)
 
-with open("data.json", "w") as outfile:
-    outfile.write(json_object)
+        else:
+            print("Object exists")
+            return False
 
-    """
-    from algoliasearch.search_client import SearchClient
-
-client = SearchClient.create('QVBA9ZZPRA', '520ea8dd3ca37da55f2c5d86729b23a8')
-index = client.init_index('KPMG_index')
-# record = {"objectID": "200-2022-009993"}
-# results = index.search(record)
-res = index.get_object("200-2022-009993")
-print(res["content"][0])
-"""
+scrape(dl_url, list_data)

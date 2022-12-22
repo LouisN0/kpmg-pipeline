@@ -1,8 +1,5 @@
 from azure.storage.blob import BlobServiceClient
 import os
-from dotenv import load_dotenv
-# Load environment variables from the .env file
-load_dotenv(".env")
 
 def upload_file(local_file_path: str, blob_name: str) -> None:
     """
